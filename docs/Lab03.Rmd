@@ -1,0 +1,313 @@
+---
+title: "Geography 176A"
+author: "[Jordan Molinski](https://github.com/J-Molinski)"
+subtitle: 'Lab 03: Distances and the Border Zone'
+output:
+  html_document:
+    theme: journal
+---
+
+```{r}
+
+# SPDS
+library(tidyverse)
+library(sf)
+library(units)
+
+# Data
+library(USAboundaries)
+library(rnaturalearth)
+
+# Visualization
+library(gghighlight)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+```
+
+
+### Question 1 : Creating Manipulatable Datasets and applying Coordinate Reference Systems
+```{r}
+eqdc = "+proj=eqdc +lat_0=40 +lon_0=-96 +lat_1=20 +lat_2=60 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs"
+```
+
+```{r}
+conus = USAboundaries::us_states(resolution = "low") %>%
+  filter(!state_name %in% c("Alaska", "Puerto Rico", "Hawaii")) %>%
+  st_transform(eqdc)
+```
+
+```{r}
+worldboundaries = rnaturalearth::countries110 %>%
+  st_as_sf(worldboundaries) %>%
+  filter(admin %in% c("Canada", "Mexico", "United States of America")) %>%
+  st_transform(eqdc)
+```
+
+```{r}
+uscities = readr::read_csv("../data/uscities.csv") %>%
+  st_as_sf(coords = c("lng", "lat"), crs = 4326) %>%
+  filter(!state_name %in% c("Alaska", "Puerto Rico", "Hawaii")) %>%
+  st_transform(eqdc)
+```
+
+
+### Question 2: Calculating Distances
+
+##2.1 City to US Border
+```{r}
+conusunion = st_union(conus) %>%
+  st_cast("MULTILINESTRING")
+```
+
+```{r}
+uscities1 = uscities %>%
+  mutate(dist_to_usBorder = st_distance(uscities, conusunion)) %>%
+  select(state_name, city, dist_to_usBorder) %>%
+  slice_max(dist_to_usBorder, n=5)
+ 
+city_to_border = knitr::kable(uscities1,
+              caption = "The 5 US Cities Furthest from a National Border or Coastline",
+              col.names = c("State", "City", "Distance to National Border or Coastline (m)", "Geometry"))
+
+city_to_border
+```
+
+
+##2.2 City to State Border
+```{r}
+conuscombine = st_combine(conus) %>%
+  st_cast("MULTILINESTRING")
+```
+
+```{r}
+city_to_stateborder = uscities %>%
+  mutate(dist_to_stateborder = st_distance(uscities, conuscombine)) %>%
+  select(state_name, city, dist_to_stateborder) %>%
+  slice_max(dist_to_stateborder, n=5)
+
+city_to_state = knitr::kable(city_to_stateborder,
+                             caption = "The 5 US Cities Furthest from a State Border",
+                             col.names = c("State", "City", "Distance to State Border (m)", "Geometry"))
+
+city_to_state
+```
+
+##2.3 City to Mexican Border
+```{r}
+mexico = worldboundaries %>%
+  filter(admin == "Mexico")
+  
+mexico_combine = st_combine(mexico) %>%
+  st_cast("MULTILINESTRING")
+```
+
+
+```{r}
+city_to_mexico = uscities %>%
+  mutate(dist_to_mexico = st_distance(uscities, mexico_combine)) %>%
+  select(state_name, city, dist_to_mexico) %>%
+  slice_max(dist_to_mexico, n=5)
+
+city_to_mexicotable = knitr::kable(city_to_mexico,
+                                   caption = "The 5 US Cities Furthest from Mexico",
+                                   col.names = c("State", "City", "Distance to Mexico (m)", "Geometry"))
+
+city_to_mexicotable
+```
+
+##2.4 City to Canadian Border
+```{r}
+canada = worldboundaries %>%
+  filter(admin =="Canada")
+
+canada_combine = st_combine(canada) %>%
+  st_cast("MULTILINESTRING")
+```
+
+```{r}
+city_to_canada = uscities %>%
+  mutate(dist_to_canada = st_distance(uscities, canada_combine)) %>%
+  select(state_name, city, dist_to_canada) %>%
+  slice_max(dist_to_canada, n=5)
+
+city_to_canadatable = knitr::kable(city_to_canada,
+                              caption = "The 5 US Cities Furthest from Canada",
+                              col.names = c("State", "City", "Distance to Mexico (m)", "Geometry"))
+
+city_to_canadatable
+```
+
+
+### Question #3 Visualizing Distance Data
+
+##3.1 Data
+```{r}
+bigcities = uscities %>%
+  select(state_name, city, population) %>%
+  st_transform(eqdc) %>%
+  slice_max(population, n = 10)
+```
+
+
+```{r}
+plot1 = ggplot() +
+  geom_sf(data = conuscombine) +
+  geom_sf(data = mexico_combine) +
+  geom_sf(data = canada_combine) +
+  geom_sf(data = bigcities, col = "red") +
+  ggthemes::theme_map() +
+  ggrepel::geom_label_repel(
+    data = bigcities,
+    aes(label = city, geometry = geometry),
+    stat = "sf_coordinates",
+  ) 
+ggsave(plot1, filename = "../img/Q3-Plot1.png")
+plot1
+
+```
+
+
+## 3.2 -- City to US border map
+```{r}
+uscities2 = uscities %>%
+  mutate(dist_to_usBorder = st_distance(uscities, conusunion)) %>%
+  select(state_name, city, dist_to_usBorder) %>%
+  drop_units()
+```
+
+```{r}
+plot2 = ggplot() +
+  geom_sf(data = conusunion) +
+  geom_sf(data = uscities2, aes(col = dist_to_usBorder), size = .1) +
+  geom_sf(data = uscities1, col = "blue") + 
+  scale_color_gradient(low = "gray", high = "red") +
+  ggthemes::theme_map() +
+  ggrepel::geom_label_repel(
+    data = uscities1,
+    aes(label = city, geometry = geometry),
+    stat = "sf_coordinates"
+  )
+
+ggsave(plot2, filename = "../img/Q3-Plot2.png")
+plot2
+  
+```
+
+## 3.3 -- City to State Border Map
+
+```{r}
+city_to_stateborder1 = uscities %>%
+  mutate(dist_to_stateborder = st_distance(uscities, conuscombine)) %>%
+  select(state_name, city, dist_to_stateborder) %>%
+  drop_units()
+```
+
+```{r}
+plot3 = ggplot() +
+  geom_sf(data = conuscombine) +
+  geom_sf(data = city_to_stateborder1, aes(col = dist_to_stateborder), size = .1) +
+  geom_sf(data = city_to_stateborder, col = "blue") + 
+  scale_color_gradient(low = "gray", high = "red") +
+  ggthemes::theme_map() +
+  ggrepel::geom_label_repel(
+    data = city_to_stateborder,
+    aes(label = city, geometry = geometry),
+    stat = "sf_coordinates"
+  )
+
+ggsave(plot3, filename = "../img/Q3-Plot3.png")
+plot3
+```
+
+## 3.4 -- Equidistant to Canada and Mexico
+```{r}
+mex_can = uscities %>%
+  mutate(dist_to_canada = st_distance(., canada_combine), 
+         dist_to_canada = set_units(dist_to_canada, "km"), 
+         dist_to_canada = drop_units(dist_to_canada)) %>%
+  mutate(dist_to_mexico = st_distance(., mexico_combine),
+         dist_to_mexico = set_units(dist_to_mexico, "km"),
+         dist_to_mexico = drop_units(dist_to_mexico)) %>%
+  mutate(equidist = abs(dist_to_mexico - dist_to_canada)) %>%
+  select(city, state_name, population, equidist) 
+
+mex_can5 = mex_can %>%
+  filter(equidist <= 100) %>%
+  slice_max(population, n = 5)
+
+ggplot() +
+  geom_sf(data = mex_can, aes(col = equidist), size = .1) +
+  geom_sf(data = conusunion) +
+  scale_color_gradient(low = "gray", high = "red") +
+  gghighlight::gghighlight(equidist <= 100) +
+  ggthemes::theme_map() +
+  ggrepel::geom_label_repel(
+    data = mex_can5,
+    aes(label = city, geometry = geometry),
+    stat = "sf_coordinates"
+  )
+ 
+```
+filter()
+group_by(state)
+slice()
+ungroup()
+
+
+### Question #4 == Application
+
+## 4.1 -- Table of information
+```{r}
+worldboundariescombine = st_combine(worldboundaries) %>%
+  st_cast("MULTILINESTRING")
+
+cities100 = uscities %>%
+  mutate(dist_to_bord = st_distance(., worldboundariescombine), 
+         dist_to_bord = set_units(dist_to_bord, "km"), 
+         dist_to_bord = drop_units(dist_to_bord)) 
+
+cities100pop = cities100 %>%
+  st_drop_geometry() %>%
+  summarise(population) %>%
+  sum()
+
+citiespercent = cities100pop/328200000
+tablesub = data.frame(num_cities = 7481,
+                      pop = cities100pop,
+                      per = citiespercent,
+                      match = FALSE)
+kable(tablesub,
+             col.names = c("Number of Cities", "Total Population", "Percent", "Match to ACLU"),
+             caption = "Comparison to ACLU") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+  
+```
+
+## 4.2 -- Mapping Border Zone
+```{r}
+topcities = cities100 %>%
+  filter(dist_to_bord <= 100) %>%
+  group_by(state_name) %>%
+  slice_max(population, n = 1) %>% 
+  ungroup()
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = cities100, aes(col = dist_to_bord), size = .3) +
+  geom_sf(data = worldboundariescombine) +
+  geom_sf(data = conuscombine) +
+  scale_color_gradient(low = "orange", high = "darkred") +
+  gghighlight::gghighlight(dist_to_bord <= 100) +
+  ggthemes::theme_map() +
+  ggrepel::geom_label_repel(
+    data = topcities,
+    aes(label = city, geometry = geometry),
+    stat = "sf_coordinates"
+  )
+
+```
+
+

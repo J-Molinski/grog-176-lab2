@@ -1,0 +1,91 @@
+---
+title: "Geography 176A"
+author: "[Jordan Molinski](https://github.com/J-Molinski)"
+subtitle: 'Lab 03: COVID-19 Pandemic'
+output:
+  html_document:
+    theme: journal
+---
+
+```{r, echo=FALSE, warning=FALSE}
+library(knitr)
+library(readxl)
+library(zoo)
+
+Pop <- read_excel("../data/PopulationEstimates.xls", 
+    skip = 2)
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+url = ('https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv')
+covid = read_csv(url)
+head(covid, 5)
+```
+
+#Question 1
+```{r, message=FALSE, warning=FALSE}
+#Most New Cases
+dat1 = covid %>%
+  filter(state == "California") %>%
+  group_by(county) %>%
+  mutate(newCases = cases - lag(cases)) %>%
+  ungroup() %>%
+  filter(date == max(date)) %>%
+  slice_max(newCases, n = 5) %>%
+  select(county, newCases)
+
+knitr::kable(dat1, 
+             caption = "Most New Cases By County in CA",
+             col.names = c("County", "New Cases"))
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Most Total Cases
+dat2 = covid %>%
+  filter(date == max(date), state == "California") %>%
+  select(county, cases) %>%
+  slice_max(cases, n=5)
+
+knitr::kable(dat2, 
+             caption = "Most Total Cases By County in CA",
+             col.names = c("County", "total Cases"))
+```
+
+```{r, message=FALSE, warning=FALSE}
+dat3 = covid %>%
+  filter(date == max(date), state == "California") %>%
+  select(county, cases, fips) 
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+
+pop2 = Pop %>%
+  filter(State == "CA") %>%
+  select(state = State, POP_ESTIMATE_2019, fips = FIPStxt)
+  
+```
+
+```{r, message=FALSE, warning=FALSE}
+pop_dat_join = left_join(dat3, pop2, by = "fips")
+```
+
+```{r}
+top5_percapita = pop_dat_join %>%
+  mutate(percapita = cases/POP_ESTIMATE_2019) %>%
+  select(county, percapita) %>%
+  slice_max(percapita, n = 5)
+
+knitr::kable(top5_percapita,
+             caption = "Top 5 CA Counties by Cases per Capita",
+             col.names = c("County", "Cases per Capita"))
+
+```
+
+```{r}
+
+
+```
+
+
