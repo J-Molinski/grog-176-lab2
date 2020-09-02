@@ -1,0 +1,311 @@
+---
+title: "Geography 176A"
+author: "[Jordan Molinski](https://github.com/J-Molinski)"
+subtitle: 'Lab 04: Tesselations, Point-in-Polygon'
+output:
+  html_document:
+    theme: journal
+---
+
+```{r}
+
+# SPDS
+library(tidyverse)
+library(sf)
+library(units)
+
+# Data
+library(USAboundaries)
+library(rnaturalearth)
+
+# Visualization
+library(gghighlight)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(readxl)
+library(leaflet)
+```
+
+
+### Question #1 : Tesselated Surfaces and Plots
+
+#Tesselation plot function
+```{r}
+plot_tess = function(data, title){
+  ggplot() + 
+    geom_sf(data = data, fill = "white", col = "navy", size = .2) +   
+    theme_void() +
+    labs(title = title, caption = paste("This tesselation has:", nrow(data), "tiles" )) +
+    theme(plot.title = element_text(hjust = .5, color =  "navy", face = "bold"))
+}
+```
+
+
+## 1.1 Gathering Conus County Data
+```{r}
+conus = USAboundaries::us_counties(resolution = "low") %>%
+  filter(!state_name %in% c("Alaska", "Puerto Rico", "Hawaii")) %>%
+  st_transform(5070)
+plot_tess(conus, "CONUS Counties")
+```
+
+
+## 1.2 County Centroids
+```{r}
+countycentroid = st_centroid(conus) %>%
+  st_union() %>%
+  st_cast("MULTIPOINT")
+```
+
+## 1.3 Tesselations and Coverages
+
+
+# Voroni Tesselation over County Centroids
+```{r}
+vgrid = st_voronoi(countycentroid) %>% 
+  st_cast() %>%
+  st_as_sf() %>%
+  mutate(id = 1:n())
+
+vgrid = st_intersection(vgrid, st_union(conus))
+plot_tess(vgrid, "Voronoi Coverage") + 
+  geom_sf(data = countycentroid, col = "darkred", size = .2)
+
+```
+
+# Delaney Triangulation
+```{r}
+tgrid = st_triangulate(countycentroid) %>% 
+  st_cast() %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+
+tgrid = st_intersection(tgrid, st_union(conus))
+plot_tess(tgrid, "Triangulation") +
+  geom_sf(data = countycentroid, col = "darkred", size = .2)
+```
+
+# Square Grid
+```{r}
+sq_grid = st_make_grid(conus, n = 70) %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+plot_tess(sq_grid, "Square Coverage Grid")
+```
+
+# Hex Grid
+```{r}
+hex_grid = st_make_grid(conus, n = 70, square = FALSE) %>% 
+  st_as_sf() %>% 
+  mutate(id = 1:n())
+plot_tess(hex_grid, "Hexagonal Coverage Grid")
+```
+
+
+### Question #2
+```{r}
+sum_tess = function(data, string){
+  variable = data %>%
+    mutate(area = st_area(data)) %>%
+    drop_units() %>%
+    mutate(area = area/100000) 
+  dataframe = data.frame(type = string, 
+                         numfeat = nrow(data), 
+                         meanarea = mean(variable$area),
+                         stdev = sd(variable$area),
+                         totalarea = sum(variable$area))
+  }
+```
+
+```{r}
+conus_test = sum_tess(conus, "original")
+vgrid_sum = sum_tess(vgrid, "voronoi")
+tgrid_sum = sum_tess(tgrid, "Triangulation")
+hexgrid_sum = sum_tess(hex_grid, "Hex Grid")
+sqgrid_sum = sum_tess(sq_grid, "Square Grid")
+```
+
+```{r}
+tess_summary = bind_rows(conus_test, vgrid_sum, tgrid_sum, hexgrid_sum, sqgrid_sum)
+
+tess_sum_table1 = knitr::kable(tess_summary,
+                               caption = "Tesselation Summary Traits",
+                               col.names = c("Tesselation", "Number of Features", "Mean Feature Area", "Standard Deviation of Feature Area", "Total Area of Coverage"))
+
+tess_sum_table1
+```
+
+##2.5 
+Voronoi: The voronoi tessellation keeps the number of features the same as the original counties data, covers the same total area, but has a slightly smaller standard deviation of feature size. 
+Triangulated: The triangulated tessellation has almost twice the number of features as the original counties plot and the voronoi plot, with less mean area per feature. Large features are maintained in the western united states while the eastern united states is broken up into tiny fragments. 
+Square grid: The square grid, a tessellation which creates squares of equal area, has the same number of features as the original counties plot and the voronoi plot, but each square is exactly the same size which can help better show regional trends which could be obscured by the difference in feature size in the non-equal area tessellations. 
+Hexgrid: The hexagonal tessellation, like the square grid, is an equal area tessellation which has fewer, but larger features than that of the square grid. 
+
+
+### Question #3
+```{r, message = FALSE, warning = FALSE}
+dams = readxl::read_xlsx("../data/NID2019_U.xlsx") %>%
+  filter(!is.na(LATITUDE), !is.na(LONGITUDE)) %>%
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs = 4326) %>%
+  st_transform(5070) %>%
+  st_filter(conus)
+```
+
+```{r}
+point_in_polygonds = function(points, polygon, ID){
+      st_join(polygon, points) %>%
+        st_drop_geometry() %>%
+        count(get(ID)) %>%
+        setNames(c(ID, "n")) %>%
+        left_join(polygon, by = ID) %>%
+        st_as_sf()
+    }
+```
+
+```{r}
+conus_pip = point_in_polygonds(dams, conus, "geoid")
+plot(conus_pip)
+
+vgrid_pip = point_in_polygonds(dams, vgrid, "id")
+plot(vgrid_pip)
+
+tgrid_pip = point_in_polygonds(dams, tgrid, "id")
+plot(tgrid_pip)
+
+sqgrid_pip = point_in_polygonds(dams, sq_grid, "id")
+plot(sqgrid_pip)
+
+hexgrid_pip = point_in_polygonds(dams, hex_grid, "id")
+plot(hexgrid_pip)
+```
+
+ggplot function
+
+```{r}
+plot_counts = function(arg1, title){
+   ggplot() + 
+    geom_sf(data = arg1, aes(fill = n), col = NA, size = .2) + 
+    viridis::scale_fill_viridis(option = "B") + 
+    theme_void() + 
+    theme(plot.title = element_text(face = "bold", color = "darkblue", hjust = .5, size = 24)) +
+    labs(title = paste0(title),
+         caption = paste0("Total number of dams present: ", sum(arg1$n)))
+}
+```
+
+```{r}
+conus_counts = plot_counts(conus_pip, "Conus Tesselation Dam Spread")
+plot(conus_counts)
+
+vgrid_counts = plot_counts(vgrid_pip, "Voronoi Tesselation Dam Spread")
+plot(vgrid_counts)
+
+tgrid_counts = plot_counts(tgrid_pip, "Triangulated Tesselation Dam Spread")
+plot(tgrid_counts)
+
+sqgrid_counts = plot_counts(sqgrid_pip, "Square Tesselation Dam Spread")
+plot(sqgrid_counts)
+
+hexgrid_counts = plot_counts(hexgrid_pip, "Hexagonal Tesselation Dam Spread")
+plot(hexgrid_counts)
+```
+
+
+## 3.6
+MAUP, or the Modifiable Area Unit Problem is a source of statistical error in spatial analysis. The tessellations which preserve county area such as the voronoi tessellation and the triangulated tessellation show that there are many dams located in the central northern part of the united state. These large counties hold more dams as they have larger areas, so this visualization of the data may misconstrue where dams lie regionally, as opposed to county by county. By using an equal area tessellation, such as a square or hexagonal grid, it is shown that most dams actually lie right in the center of the United States. I will use the hexagonal grid going forward.  
+## 4
+
+```{r}
+dams_of_interestC = dams %>% 
+  filter(grepl("C", PURPOSES)) %>%
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED, STATE) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs=4326)
+
+dams_of_interestI = dams %>% 
+  filter(grepl("I", PURPOSES)) %>%
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED, STATE) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs=4326)
+
+dams_of_interestH = dams %>% 
+  filter(grepl("H", PURPOSES)) %>%
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED, STATE) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs=4326)
+
+dams_of_interestP = dams %>% 
+  filter(grepl("P", PURPOSES)) %>%
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED, STATE) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs=4326)
+```
+
+```{r}
+Cdams_pip = point_in_polygonds(dams_of_interestC, hex_grid, "id")
+plot(Cdams_pip)
+  
+Idams_pip = point_in_polygonds(dams_of_interestI, hex_grid, "id")
+plot(Idams_pip)
+
+Hdams_pip = point_in_polygonds(dams_of_interestH, hex_grid, "id")
+plot(Hdams_pip)
+
+Pdams_pip = point_in_polygonds(dams_of_interestP, hex_grid, "id")
+plot(Pdams_pip)
+```
+
+```{r}
+plot_counts1 = function(arg1, title){
+   ggplot() + 
+    geom_sf(data = arg1, aes(fill = n), col = NA, size = .2) + 
+    viridis::scale_fill_viridis(option = "B") + 
+    theme_void() + 
+    theme(plot.title = element_text(face = "bold", color = "darkblue", hjust = .5, size = 24)) +
+    gghighlight::gghighlight(n > (mean(n) + sd(n))) +
+    labs(title = paste0(title),
+         caption = paste0("Total number of dams present: ", sum(arg1$n)))
+}
+```
+
+```{r}
+Cdams_counts = plot_counts1(Cdams_pip, "Flood Control Dams Spread")
+plot(Cdams_counts)
+
+Idams_counts = plot_counts1(Idams_pip, "Irrigation Dams Spread")
+plot(Idams_counts)
+
+Hdams_counts = plot_counts1(Hdams_pip, "Hydroelectric Dams Spread")
+plot(Hdams_counts)
+
+Pdams_counts = plot_counts1(Pdams_pip, "Fire Protection Dams Spread")
+plot(Pdams_counts)
+
+```
+I think the use of the equal area Hexagonal tessellation to observe the distribution of dams used for different purposes provided some interesting insight. For example, almost all of the dams used for flood control are distributed along the Mississippi and accompanying river systems, areas used to seeng flooded plains. Alternatively, the majority of dams used to produce hydroelectric power were concentrated in the upper northeastern united states, as well as along the mountain ranges on the western coast of the united states. These hydroelectric dams use elevation change in flowing waters to produce electricity, so it makes sense that dams used for this purpose would be located in mountainous regions with ample streams and rivers which run downhill. 
+
+Extra Credit
+```{r}
+majorrivers = read_sf("../data/MajorRivers.dbf") %>% 
+  filter(SYSTEM == "Mississippi") %>%
+  mutate(STATE = c("AR", "MI", "MO", "OH")) %>%
+  st_transform(4326)
+
+dams_of_interest1 = dams %>% 
+  filter(grepl("C", PURPOSES), HAZARD == "H") %>%
+  select(DAM_NAME, PURPOSES, NID_STORAGE, YEAR_COMPLETED, STATE) %>% 
+  st_as_sf(coords = c("LONGITUDE", "LATITUDE"), crs=4326) %>% 
+  st_transform(st_crs(majorrivers)) %>% 
+  group_by(STATE) %>% 
+  slice_max(NID_STORAGE, n=1) %>% 
+  ungroup()
+
+leaflet() %>% 
+  addProviderTiles(providers$CartoDB) %>% 
+  addPolylines(data = majorrivers) %>% 
+  addCircleMarkers(data = dams_of_interest1,
+             fillColor  = ~colorQuantile("YlOrRd", NID_STORAGE)(NID_STORAGE),
+             color = NA,
+             fillOpacity = .5,
+             radius = ~sqrt(NID_STORAGE) / 175 ,
+             label = ~DAM_NAME,
+             popup = leafpop::popupTable(st_drop_geometry(dams_of_interest1), feature.id = FALSE, row.numbers = FALSE))
+```
+
