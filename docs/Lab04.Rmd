@@ -27,6 +27,9 @@ library(readxl)
 library(leaflet)
 ```
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
 
 ### Question #1 : Tesselated Surfaces and Plots
 

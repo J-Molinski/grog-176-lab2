@@ -1,0 +1,153 @@
+---
+title: "Geography 176A"
+author: "[Jordan Molinski](https://github.com/J-Molinski)"
+subtitle: 'Lab 06: Flood Risk in Mission Creek'
+output:
+  html_document:
+   theme: journal
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
+## Libraries
+```{r}
+library(osmdata)
+library(elevatr)
+library(whitebox)
+library(fasterize) # "faster" raster
+# SPDS
+library(tidyverse)
+library(sf)
+library(units)
+
+# Data
+library(USAboundaries)
+library(rnaturalearth)
+
+# Visualization
+library(gghighlight)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(readxl)
+library(leaflet)
+library(raster) # Raster Data handling
+library(tidyverse) # Data Manipulation
+library(getlandsat) # keyless Landsat data (2013-2017)
+library(sf) # Vector data processing
+library(mapview) # Rapid Interactive visualization
+library(factoextra)
+library(rgdal)
+```
+
+
+## Data Setup
+```{r}
+url = 'https://labs.waterdata.usgs.gov/api/nldi/linked-data/nwissite/USGS-11119750/basin'
+basin = read_sf(url)
+elev = elevatr::get_elev_raster(basin, z = 13) %>%
+  crop(basin) %>%
+  mask(basin)
+
+elev_ft = elev*3.281
+
+writeRaster(elev_ft, filename = "../data/basinelev.tif", overwrite = TRUE)
+elev1 = raster("../data/basinelev.tif")
+```
+
+# buildings
+```{r}
+box = st_bbox(elev1)
+osmbuilding = osmdata::opq(box) %>%
+  add_osm_feature(key = 'building') %>%
+  osmdata_sf()
+
+building_cent = st_centroid(osmbuilding$osm_polygons) %>% st_intersection(basin)
+
+railway = dplyr::filter(building_cent ,amenity == "railway")
+
+```
+
+#streams
+```{r}
+osmstream = osmdata::opq(box) %>%
+    add_osm_feature(key = 'waterway', value = 'stream') %>%
+    osmdata_sf()
+
+streams = st_intersection(osmstream$osm_lines, basin)
+
+
+```
+
+
+```{r}
+plot(elev)
+plot(building_cent, add = TRUE, col = "blue")
+```
+
+# Hillshade
+```{r}
+wbt_hillshade("../data/basinelev.tif", "../data/basinhillshade.tif")
+
+hill = raster("../data/basinhillshade.tif")
+```
+
+# Plot of Hillshade
+```{r}
+par(mar=c(0,0,0,0))
+plot(hill, col = gray.colors(256, alpha = .5), legend = FALSE, box = FALSE, axes = FALSE)
+plot(basin$geometry, add = TRUE)
+plot(streams$geometry, col = "navy", add = TRUE)
+```
+
+# river raster
+```{r}
+stream_raster = st_transform(streams, 5070) %>%
+  st_buffer(10) %>%
+  st_transform(crs(elev_ft)) %>% 
+  fasterize(elev_ft)
+
+writeRaster(stream_raster, filename = "../data/river-raster.tif", overwrite = TRUE)
+```
+
+
+#hydrologically corrected surface
+```{r}
+wbt_breach_depressions("../data/basinelev.tif",  "../data/basinelev-hcs.tif")
+```
+
+
+#HAND raster
+```{r}
+wbt_elevation_above_stream("../data/basinelev-hcs.tif", "../data/river-raster.tif", '../data/hand-raster.tif')
+```
+
+
+#Correcting to local reference datum
+```{r}
+hand = raster('../data/hand-raster.tif')
+river = raster('../data/river-raster.tif')
+hand = hand + 3.69
+hand[river == 1] = 0
+writeRaster(hand, "../data/correct-hand.tif", overwrite = TRUE)
+```
+
+# 2017 Impact Assessment
+
+```{r}
+hand = raster("../data/correct-hand.tif")
+flood = hand
+flood[flood >= 10.02] = NA
+cols = ifelse(!is.na(raster::extract(flood, building_cent)), "red", "black")
+
+plot(hill, col = gray.colors(256, alpha = .5),  legend = FALSE, 
+         main = paste0(sum(cols == "red"), "Buildings Impacted"))
+
+    plot(flood, col = rev(blues9), legend = FALSE, add = TRUE)
+    
+    plot(building_cent$geometry, add = TRUE, pch = 16, cex = .06, col = cols)
+    
+    plot(railway$geometry, col = "green", pch = 16, add = TRUE)
+    
+    plot(basin$geometry, add = TRUE, border = "black")
+```

@@ -25,6 +25,9 @@ library(knitr)
 library(kableExtra)
 ```
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
 
 ### Question 1 : Creating Manipulatable Datasets and applying Coordinate Reference Systems
 ```{r}

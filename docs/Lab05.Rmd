@@ -7,6 +7,10 @@ output:
    theme: journal
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, out.width = "75%", fig.align = 'center')
+```
+
 ## Libraries
 ```{r}
 
@@ -181,6 +185,8 @@ stackfindflood = stack(findflood, findflood2, findflood3, findflood4, findflood5
 plot(stackfindflood)
 ```
 
+
+### Question 6
 ```{r}
 sumsff = sum(stackfindflood)
 plot(sumsff, col = blues9)
